@@ -9,13 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define function static
-#define global static
-
-typedef uint32_t u32;
-typedef  int32_t s32;
-
-#define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
+#include "raw.c"
 
 #define WIN32_SECONDS_ELAPSED(start, end) ((float)((end).QuadPart - (start).QuadPart) \
       / (float)win32_global_counts_per_second.QuadPart)
@@ -32,36 +26,10 @@ global WINDOWPLACEMENT win32_global_previous_window_placement =
 #define WIN32_DEFAULT_DPI 96
 global int win32_global_dpi = WIN32_DEFAULT_DPI;
 
-#define RESOLUTION_BASE_WIDTH  320
-#define RESOLUTION_BASE_HEIGHT 240
-
-struct render_bitmap
-{
-   u32 width;
-   u32 height;
-
-   u32 *memory;
-};
-
-struct user_input
-{
-   s32 mouse_x;
-   s32 mouse_y;
-
-   bool control_scroll;
-   float scroll_delta;
-
-   bool mouse_left;
-   bool mouse_middle;
-   bool mouse_right;
-
-   bool function_keys[13];
-};
-
 #define WIN32_LOG_MAX_LENGTH 1024
 
-function void
-platform_log(char *format, ...)
+function
+PLATFORM_LOG(platform_log)
 {
    char message[WIN32_LOG_MAX_LENGTH];
 
@@ -531,7 +499,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
 
       input.control_scroll = false;
       input.scroll_delta = 0;
-      for(unsigned int index = 0; index < ARRAY_LENGTH(input.function_keys); ++index)
+      for(u32 index = 0; index < ARRAY_LENGTH(input.function_keys); ++index)
       {
          input.function_keys[index] = 0;
       }
@@ -561,7 +529,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
       input.mouse_x = cursor_position.x;
       input.mouse_y = cursor_position.y;
 
-      // TODO(law): Draw into bitmap.
+      update(&bitmap, &input, frame_seconds_elapsed);
 
       // NOTE(law): Blit bitmap to screen.
       HDC device_context = GetDC(window);
