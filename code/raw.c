@@ -2,7 +2,9 @@
 /* (c) copyright 2023 Lawrence D. Kern /////////////////////////////////////// */
 /* /////////////////////////////////////////////////////////////////////////// */
 
+#include <float.h>
 #include <math.h>
+#include <stdint.h>
 
 #define RESOLUTION_BASE_WIDTH  320
 #define RESOLUTION_BASE_HEIGHT 240
@@ -151,9 +153,46 @@ struct user_input
    bool function_keys[13];
 };
 
+struct plane
+{
+   float distance;
+   v3 normal;
+   v3 color;
+};
+
+global struct
+{
+   bool is_initialized;
+
+   u32 plane_count;
+   struct plane planes[32];
+} scene;
+
 function void
 update(struct render_bitmap *bitmap, struct user_input *input, float frame_seconds_elapsed)
 {
+   if(!scene.is_initialized)
+   {
+      scene.is_initialized = true;
+
+      struct plane *p;
+
+      p = scene.planes + scene.plane_count++;
+      p->distance = 0;
+      p->normal = vec3(0, 0, 1);
+      p->color = vec3(0, 1, 0);
+
+      p = scene.planes + scene.plane_count++;
+      p->distance = 0;
+      p->normal = vec3(0.1f, 0.1f, 1);
+      p->color = vec3(1, 0, 0);
+
+      p = scene.planes + scene.plane_count++;
+      p->distance = 0;
+      p->normal = vec3(-0.1f, 0.2f, 1);
+      p->color = vec3(1, 1, 1);
+   }
+
    u32 bitmap_width = bitmap->width;
    u32 bitmap_height = bitmap->height;
 
@@ -168,10 +207,6 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
    v3 camera_z = noz3(sub3(origin, camera_position));
    v3 camera_x = noz3(cross3(vec3(0, 0, -1), camera_z));
    v3 camera_y = noz3(cross3(camera_z, camera_x));
-
-   float ground_plane_distance = 0;
-   v3 ground_plane_normal = {0, 0, 1};
-   v3 ground_plane_color = {0, 1, 0};
 
    float aspect_ratio = (float)bitmap_width / (float)bitmap_height;
 
@@ -196,13 +231,20 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
          v3 ray_direction = noz3(sub3(film_position, camera_position));
          v3 ray_color = {0, 1, 1};
 
-         float denominator = dot3(ground_plane_normal, ray_direction);
-         if(absolute_value(denominator) > 0.0001f)
+         float minimum_t = FLT_MAX;
+         for(u32 plane_index = 0; plane_index < scene.plane_count; ++plane_index)
          {
-            float t = (-ground_plane_distance - dot3(ground_plane_normal, camera_position)) / denominator;
-            if(t > 0)
+            struct plane *p = scene.planes + plane_index;
+
+            float denominator = dot3(p->normal, ray_direction);
+            if(absolute_value(denominator) > 0.0001f)
             {
-               ray_color = ground_plane_color;
+               float t = (-p->distance - dot3(p->normal, camera_position)) / denominator;
+               if(t > 0 && t < minimum_t)
+               {
+                  minimum_t = t;
+                  ray_color = p->color;
+               }
             }
          }
 
