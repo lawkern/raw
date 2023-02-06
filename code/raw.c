@@ -14,6 +14,7 @@
 #define global static
 
 #define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
+#define LERP(a, t, b) (((1 - (t)) * (a)) + ((t) * (b)))
 
 #define PLATFORM_LOG(name) void name(char *format, ...)
 function PLATFORM_LOG(platform_log);
@@ -92,6 +93,15 @@ function v3 mul3(v3 vector, float value)
    vector.z *= value;
 
    return(vector);
+}
+
+function v3 lerp3(v3 a, float t, v3 b)
+{
+   a.x = LERP(a.x, t, b.x);
+   a.y = LERP(a.y, t, b.y);
+   a.z = LERP(a.z, t, b.z);
+
+   return(a);
 }
 
 function float dot3(v3 a, v3 b)
@@ -214,7 +224,7 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
       p = scene.planes + scene.plane_count++;
       p->distance = 0;
       p->normal = vec3(-0.1f, 0.2f, 1);
-      p->color = vec3(1, 1, 1);
+      p->color = vec3(0, 0, 1);
 
       scene.is_initialized = true;
    }
@@ -285,9 +295,9 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
          film_position = add3(film_position, mul3(scene.camera_y, film_v * 0.5f * film_height));
 
          v3 ray_direction = noz3(sub3(film_position, scene.camera_position));
-         v3 ray_color = {0, 1, 1};
 
-         float minimum_t = FLT_MAX;
+         float t_minimum = FLT_MAX;
+         struct plane *t_plane = 0;
          for(u32 plane_index = 0; plane_index < scene.plane_count; ++plane_index)
          {
             struct plane *p = scene.planes + plane_index;
@@ -296,12 +306,19 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
             if(absolute_value(denominator) > 0.0001f)
             {
                float t = (-p->distance - dot3(p->normal, scene.camera_position)) / denominator;
-               if(t > 0 && t < minimum_t)
+               if(t > 0 && t < t_minimum)
                {
-                  minimum_t = t;
-                  ray_color = p->color;
+                  t_minimum = t;
+                  t_plane = p;
                }
             }
+         }
+
+         v3 ray_color = {0, 1, 1};
+         if(t_plane)
+         {
+            float t = dot3(ray_direction, mul3(t_plane->normal, -1.0f));
+            ray_color = lerp3(vec3(0, 0.8f, 0.8f), t, t_plane->color);
          }
 
          u8 r = (u8)(ray_color.r * 255.0f);
