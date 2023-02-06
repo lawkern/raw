@@ -4,6 +4,7 @@
 
 #include <float.h>
 #include <math.h>
+#include <stdbool.h>
 #include <stdint.h>
 
 #define RESOLUTION_BASE_WIDTH  320
@@ -14,11 +15,14 @@
 
 #define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
 
-#define PLATFORM_LOG(name) name(char *format, ...)
+#define PLATFORM_LOG(name) void name(char *format, ...)
+function PLATFORM_LOG(platform_log);
 
 typedef uint8_t  u8;
 typedef uint32_t u32;
+typedef uint64_t u64;
 typedef  int32_t s32;
+typedef  int64_t s64;
 
 struct render_bitmap
 {

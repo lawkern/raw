@@ -502,13 +502,13 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
    ShowWindow(window, show_command);
    UpdateWindow(window);
 
+   struct user_input input = {0};
+
    float target_seconds_per_frame = 1.0f / 30.0f;
    float frame_seconds_elapsed = 0;
 
    LARGE_INTEGER frame_start_count;
    QueryPerformanceCounter(&frame_start_count);
-
-   struct user_input input = {0};
 
    win32_global_is_running = true;
    while(win32_global_is_running)
