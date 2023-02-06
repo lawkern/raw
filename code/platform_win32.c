@@ -46,6 +46,11 @@ function void *
 win32_allocate(SIZE_T size)
 {
    void *result = VirtualAlloc(0, size, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+   if(!result)
+   {
+      platform_log("ERROR: Windows failed to allocate virtual memory.\n");
+   }
+
    return(result);
 }
 
@@ -329,6 +334,23 @@ win32_process_input(struct user_input *input, HWND window, UINT message, WPARAM 
       }
    }
 
+   if(wparam == VK_UP)
+   {
+      input->up = (message != WM_KEYUP);
+   }
+   else if(wparam == VK_DOWN)
+   {
+      input->down = (message != WM_KEYUP);
+   }
+   else if(wparam == VK_LEFT)
+   {
+      input->left = (message != WM_KEYUP);
+   }
+   else if(wparam == VK_RIGHT)
+   {
+      input->right = (message != WM_KEYUP);
+   }
+
    // Mouse handling:
    if(message == WM_LBUTTONUP || message == WM_LBUTTONDOWN)
    {
@@ -460,7 +482,6 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
    bitmap.memory = win32_allocate(bitmap_size);
    if(!bitmap.memory)
    {
-      platform_log("ERROR: Windows failed to allocate our bitmap.\n");
       return(1);
    }
 
@@ -481,7 +502,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
    ShowWindow(window, show_command);
    UpdateWindow(window);
 
-   float target_seconds_per_frame = 1.0f / 60.0f;
+   float target_seconds_per_frame = 1.0f / 30.0f;
    float frame_seconds_elapsed = 0;
 
    LARGE_INTEGER frame_start_count;
@@ -498,7 +519,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
 
       input.control_scroll = false;
       input.scroll_delta = 0;
-      for(u32 index = 0; index < ARRAY_LENGTH(input.function_keys); ++index)
+      for(unsigned int index = 0; index < ARRAY_LENGTH(input.function_keys); ++index)
       {
          input.function_keys[index] = 0;
       }

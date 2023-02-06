@@ -151,6 +151,11 @@ struct user_input
    bool mouse_right;
 
    bool function_keys[13];
+
+   bool up;
+   bool down;
+   bool left;
+   bool right;
 };
 
 struct plane
@@ -164,6 +169,16 @@ global struct
 {
    bool is_initialized;
 
+   // NOTE(law): Both camera-space and world-space are represented using
+   // right-hand coordinate systems. The camera is set to always point at the
+   // world-space origin {0, 0, 0}. The camera's y-axis points down relative to
+   // its image. It's z-axis points into the scene.
+
+   v3 camera_position;
+   v3 camera_x;
+   v3 camera_y;
+   v3 camera_z;
+
    u32 plane_count;
    struct plane planes[32];
 } scene;
@@ -171,9 +186,14 @@ global struct
 function void
 update(struct render_bitmap *bitmap, struct user_input *input, float frame_seconds_elapsed)
 {
+   u32 bitmap_width = bitmap->width;
+   u32 bitmap_height = bitmap->height;
+
+   v3 initial_camera_position = {0, 15.0f, 1.5f};
+
    if(!scene.is_initialized)
    {
-      scene.is_initialized = true;
+      scene.camera_position = initial_camera_position;
 
       struct plane *p;
 
@@ -191,22 +211,53 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
       p->distance = 0;
       p->normal = vec3(-0.1f, 0.2f, 1);
       p->color = vec3(1, 1, 1);
+
+      scene.is_initialized = true;
    }
 
-   u32 bitmap_width = bitmap->width;
-   u32 bitmap_height = bitmap->height;
+   // NOTE(law): Handle user input.
+   if(input->function_keys[1])
+   {
+      scene.camera_position = initial_camera_position;
+   }
+   else
+   {
+      v3 movement = {0, 0, 0};
+      float increment = 0.2f;
 
+      if(input->up)
+      {
+         v3 direction_z = mul3(scene.camera_z, increment);
+         movement.x += direction_z.x;
+         movement.y += direction_z.y;
+      }
+      if(input->down)
+      {
+         v3 direction_z = mul3(scene.camera_z, increment);
+         movement.x -= direction_z.x;
+         movement.y -= direction_z.y;
+      }
+      if(input->left)
+      {
+         v3 direction_x = mul3(scene.camera_x, increment);
+         movement.x -= direction_x.x;
+         movement.y -= direction_x.y;
+      }
+      if(input->right)
+      {
+         v3 direction_x = mul3(scene.camera_x, increment);
+         movement.x += direction_x.x;
+         movement.y += direction_x.y;
+      }
+
+      scene.camera_position = add3(scene.camera_position, movement);
+   }
+
+   // NOTE(law): Calculate camera vectors.
    v3 origin = {0, 0, 0};
-   v3 camera_position = {0, 15.0f, 1.5f};
-
-   // Both camera-space and world-space are represented using right-hand
-   // coordinate systems. The camera is set to always point at the world-space
-   // origin {0, 0, 0}. The camera's y-axis points down relative to its
-   // image. It's z-axis points into the scene.
-
-   v3 camera_z = noz3(sub3(origin, camera_position));
-   v3 camera_x = noz3(cross3(vec3(0, 0, -1), camera_z));
-   v3 camera_y = noz3(cross3(camera_z, camera_x));
+   scene.camera_z = noz3(sub3(origin, scene.camera_position));
+   scene.camera_x = noz3(cross3(vec3(0, 0, -1), scene.camera_z));
+   scene.camera_y = noz3(cross3(scene.camera_z, scene.camera_x));
 
    float aspect_ratio = (float)bitmap_width / (float)bitmap_height;
 
@@ -214,8 +265,9 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
    float film_height = 1.0f / aspect_ratio;
 
    float focal_length = 1.0f;
-   v3 film_center = add3(camera_position, mul3(camera_z, focal_length));
+   v3 film_center = add3(scene.camera_position, mul3(scene.camera_z, focal_length));
 
+   // NOTE(law): Draw into bitmap.
    for(u32 y = 0; y < bitmap_height; ++y)
    {
       float film_v = -1.0f + (2.0f * ((float)y / (float)bitmap_height));
@@ -225,10 +277,10 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
          float film_u = -1.0f + (2.0f * ((float)x / (float)bitmap_width));
 
          v3 film_position = film_center;
-         film_position = add3(film_position, mul3(camera_x, film_u * 0.5f * film_width));
-         film_position = add3(film_position, mul3(camera_y, film_v * 0.5f * film_height));
+         film_position = add3(film_position, mul3(scene.camera_x, film_u * 0.5f * film_width));
+         film_position = add3(film_position, mul3(scene.camera_y, film_v * 0.5f * film_height));
 
-         v3 ray_direction = noz3(sub3(film_position, camera_position));
+         v3 ray_direction = noz3(sub3(film_position, scene.camera_position));
          v3 ray_color = {0, 1, 1};
 
          float minimum_t = FLT_MAX;
@@ -239,7 +291,7 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
             float denominator = dot3(p->normal, ray_direction);
             if(absolute_value(denominator) > 0.0001f)
             {
-               float t = (-p->distance - dot3(p->normal, camera_position)) / denominator;
+               float t = (-p->distance - dot3(p->normal, scene.camera_position)) / denominator;
                if(t > 0 && t < minimum_t)
                {
                   minimum_t = t;
