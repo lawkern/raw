@@ -299,9 +299,8 @@ global struct
    bool is_initialized;
 
    // NOTE(law): Both camera-space and world-space are represented using
-   // right-hand coordinate systems. The camera is set to always point at the
-   // world-space origin {0, 0, 0}. The camera's y-axis points down relative to
-   // its image. It's z-axis points into the scene.
+   // right-hand coordinate systems. The camera's y-axis points up relative to
+   // its image. It's z-axis points away from the scene, into the camera.
 
    v3 camera_position;
 
