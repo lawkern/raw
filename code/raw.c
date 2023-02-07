@@ -16,6 +16,7 @@
 #define TAU32 6.28318530717959f
 
 #define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
+#define MINIMUM(a, b) ((a) < (b) ? (a) : (b))
 #define LERP(a, t, b) (((1 - (t)) * (a)) + ((t) * (b)))
 
 #define PLATFORM_LOG(name) void name(char *format, ...)
@@ -325,6 +326,67 @@ point_camera(v3 camera_position, v3 target_position, v3 up)
 }
 
 function void
+render_tile(struct render_bitmap *bitmap, u32 minx, u32 miny, u32 maxx, u32 maxy)
+{
+   u32 bitmap_width  = bitmap->width;
+   u32 bitmap_height = bitmap->height;
+
+   float aspect_ratio = (float)bitmap_width / (float)bitmap_height;
+
+   float film_width = 1.0f;
+   float film_height = 1.0f / aspect_ratio;
+   v3 film_center = sub3(scene.camera_position, mul3(scene.camera_z, scene.focal_length));
+
+   for(u32 y = miny; y < maxy; ++y)
+   {
+      float film_v = -1.0f + (2.0f * ((float)y / (float)bitmap_height));
+
+      for(u32 x = minx; x < maxx; ++x)
+      {
+         float film_u = -1.0f + (2.0f * ((float)x / (float)bitmap_width));
+
+         v3 film_position = film_center;
+         film_position = add3(film_position, mul3(scene.camera_x, film_u * 0.5f * film_width));
+         film_position = add3(film_position, mul3(scene.camera_y, film_v * 0.5f * film_height));
+
+         v3 ray_direction = noz3(sub3(film_position, scene.camera_position));
+
+         float t_minimum = FLT_MAX;
+         struct plane *t_plane = 0;
+         for(u32 plane_index = 0; plane_index < scene.plane_count; ++plane_index)
+         {
+            struct plane *p = scene.planes + plane_index;
+
+            float denominator = dot3(p->normal, ray_direction);
+            if(absolute_value(denominator) > 0.0001f)
+            {
+               float t = (-p->distance - dot3(p->normal, scene.camera_position)) / denominator;
+               if(t > 0 && t < t_minimum)
+               {
+                  t_minimum = t;
+                  t_plane = p;
+               }
+            }
+         }
+
+         v3 ray_color = {0, 1, 1};
+         if(t_plane)
+         {
+            float t = dot3(ray_direction, mul3(t_plane->normal, -1.0f));
+            ray_color = lerp3(vec3(0.3f, 0.8f, 0.8f), t, t_plane->color);
+         }
+
+         u8 r = (u8)(ray_color.r * 255.0f);
+         u8 g = (u8)(ray_color.g * 255.0f);
+         u8 b = (u8)(ray_color.b * 255.0f);
+         u8 a = 255;
+
+         bitmap->memory[(y * bitmap_width) + x] = (r << 16) | (g <<  8) | (b <<  0) | (a << 24);
+      }
+   }
+}
+
+function void
 update(struct render_bitmap *bitmap, struct user_input *input, float frame_seconds_elapsed)
 {
    v3 initial_camera_position = {0, 15.0f, 1.5f};
@@ -426,60 +488,28 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
       }
    }
 
-   u32 bitmap_width = bitmap->width;
-   u32 bitmap_height = bitmap->height;
-   float aspect_ratio = (float)bitmap_width / (float)bitmap_height;
-
-   float film_width = 1.0f;
-   float film_height = 1.0f / aspect_ratio;
-   v3 film_center = sub3(scene.camera_position, mul3(scene.camera_z, scene.focal_length));
-
    // NOTE(law): Draw into bitmap.
-   for(u32 y = 0; y < bitmap_height; ++y)
+
+   u32 tile_width  = 64;
+   u32 tile_height = 64;
+
+   u32 bitmap_width  = bitmap->width;
+   u32 bitmap_height = bitmap->height;
+
+   u32 tile_count_x = (bitmap_width / tile_width) + 1;
+   u32 tile_count_y = (bitmap_height / tile_height) + 1;
+
+   for(u32 y = 0; y < tile_count_y; ++y)
    {
-      float film_v = -1.0f + (2.0f * ((float)y / (float)bitmap_height));
+      u32 miny = tile_height * y;
+      u32 maxy = MINIMUM(miny + tile_height, bitmap_height);
 
-      for(u32 x = 0; x < bitmap_width; ++x)
+      for(u32 x = 0; x < tile_count_x; ++x)
       {
-         float film_u = -1.0f + (2.0f * ((float)x / (float)bitmap_width));
+         u32 minx = tile_width * x;
+         u32 maxx = MINIMUM(minx + tile_width, bitmap_width);
 
-         v3 film_position = film_center;
-         film_position = add3(film_position, mul3(scene.camera_x, film_u * 0.5f * film_width));
-         film_position = add3(film_position, mul3(scene.camera_y, film_v * 0.5f * film_height));
-
-         v3 ray_direction = noz3(sub3(film_position, scene.camera_position));
-
-         float t_minimum = FLT_MAX;
-         struct plane *t_plane = 0;
-         for(u32 plane_index = 0; plane_index < scene.plane_count; ++plane_index)
-         {
-            struct plane *p = scene.planes + plane_index;
-
-            float denominator = dot3(p->normal, ray_direction);
-            if(absolute_value(denominator) > 0.0001f)
-            {
-               float t = (-p->distance - dot3(p->normal, scene.camera_position)) / denominator;
-               if(t > 0 && t < t_minimum)
-               {
-                  t_minimum = t;
-                  t_plane = p;
-               }
-            }
-         }
-
-         v3 ray_color = {0, 1, 1};
-         if(t_plane)
-         {
-            float t = dot3(ray_direction, mul3(t_plane->normal, -1.0f));
-            ray_color = lerp3(vec3(0.3f, 0.8f, 0.8f), t, t_plane->color);
-         }
-
-         u8 r = (u8)(ray_color.r * 255.0f);
-         u8 g = (u8)(ray_color.g * 255.0f);
-         u8 b = (u8)(ray_color.b * 255.0f);
-         u8 a = 255;
-
-         bitmap->memory[(y * bitmap_width) + x] = (r << 16) | (g <<  8) | (b <<  0) | (a << 24);
+         render_tile(bitmap, minx, miny, maxx, maxy);
       }
    }
 }
