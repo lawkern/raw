@@ -125,18 +125,18 @@ opengl_initialize()
       -1, -1,
       -1, +1,
 
-      // NOTE(law): The source bitmap is top-down, so just reverse the y texture
-      // coordinates for now to match the bottom-up convention of OpenGL.
+      // NOTE(law): If the source bitmap is top-down, just reverse the y texture
+      // coordinates to match the bottom-up convention of OpenGL.
 
       // NOTE(law): Lower triangle texture coordinates.
-      1, 0,
       1, 1,
-      0, 1,
+      1, 0,
+      0, 0,
 
       // NOTE(law): Upper triangle texture coordinates.
-      1, 0,
-      0, 1,
+      1, 1,
       0, 0,
+      0, 1,
    };
 
    glGenVertexArrays(1, &opengl_global_vertex_array_object);

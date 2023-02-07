@@ -307,7 +307,7 @@ linux_display_bitmap(Window window, struct render_bitmap bitmap)
 }
 
 function void
-linux_process_input(Window window, XEvent event)
+linux_process_input(Window window, XEvent event, struct user_input *input)
 {
    // Keyboard handling:
    if(event.type == KeyPress || event.type == KeyRelease)
@@ -333,12 +333,121 @@ linux_process_input(Window window, XEvent event)
          {
             linux_set_window_size(window, 2*RESOLUTION_BASE_WIDTH, 2*RESOLUTION_BASE_HEIGHT);
          }
+         else if(keysym == XK_F1)
+         {
+            input->function_keys[1] = true;
+         }
+         else if(keysym == XK_F2)
+         {
+            input->function_keys[2] = true;
+         }
+         else if(keysym == XK_F3)
+         {
+            input->function_keys[3] = true;
+         }
+         else if(keysym == XK_F4)
+         {
+            input->function_keys[4] = true;
+         }
+         else if(keysym == XK_F5)
+         {
+            input->function_keys[5] = true;
+         }
+         else if(keysym == XK_F6)
+         {
+            input->function_keys[6] = true;
+         }
+         else if(keysym == XK_F7)
+         {
+            input->function_keys[7] = true;
+         }
+         else if(keysym == XK_F8)
+         {
+            input->function_keys[8] = true;
+         }
+         else if(keysym == XK_F9)
+         {
+            input->function_keys[9] = true;
+         }
+         else if(keysym == XK_F10)
+         {
+            input->function_keys[10] = true;
+         }
+         else if(keysym == XK_F11)
+         {
+            input->function_keys[11] = true;
+         }
+         else if(keysym == XK_F12)
+         {
+            input->function_keys[12] = true;
+         }
+      }
+
+      if(keysym == XK_Up)
+      {
+         input->up = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_Down)
+      {
+         input->down = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_Left)
+      {
+         input->left = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_Right)
+      {
+         input->right = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_w)
+      {
+         input->move_up = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_a)
+      {
+         input->move_left = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_s)
+      {
+         input->move_down = (event.type != KeyRelease);
+      }
+      else if(keysym == XK_d)
+      {
+         input->move_right = (event.type != KeyRelease);
+      }
+   }
+
+   // Mouse handling:
+   if(event.type == ButtonPress || event.type == ButtonRelease)
+   {
+      int button = event.xbutton.button;
+      if(button == Button1) // Left click
+      {
+         input->mouse_left = (event.type != ButtonRelease);
+      }
+      else if(button == Button2) // Middle click
+      {
+         input->mouse_middle = (event.type != ButtonRelease);
+      }
+      else if(button == Button3)
+      {
+         input->mouse_right = (event.type != ButtonRelease);
+      }
+      else if(button == Button4) // Scroll up
+      {
+         input->control_scroll = event.xbutton.state & ControlMask;
+         input->scroll_delta = 1.0f;
+      }
+      else if(button == Button5) // Scroll down
+      {
+         input->control_scroll = event.xbutton.state & ControlMask;
+         input->scroll_delta = -1.0f;
       }
    }
 }
 
 function void
-linux_process_events(Window window)
+linux_process_events(Window window, struct user_input *input)
 {
    Display *display = linux_global_display;
 
@@ -394,7 +503,7 @@ linux_process_events(Window window)
          case ButtonPress:
          case ButtonRelease:
          {
-            linux_process_input(window, event);
+            linux_process_input(window, event, input);
          } break;
 
          default:
@@ -425,7 +534,7 @@ main(int argument_count, char **arguments)
 
    struct user_input input = {0};
 
-   float target_seconds_per_frame = 1.0f / 60.0f;
+   float target_seconds_per_frame = 1.0f / 30.0f;
    float frame_seconds_elapsed = 0;
 
    struct timespec frame_start_count;
@@ -434,7 +543,7 @@ main(int argument_count, char **arguments)
    linux_global_is_running = true;
    while(linux_global_is_running)
    {
-      linux_process_events(window);
+      linux_process_events(window, &input);
 
       update(&bitmap, &input, frame_seconds_elapsed);
 
