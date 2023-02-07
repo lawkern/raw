@@ -350,6 +350,22 @@ win32_process_input(struct user_input *input, HWND window, UINT message, WPARAM 
    {
       input->right = (message != WM_KEYUP);
    }
+   else if(wparam == 'W')
+   {
+      input->move_up = (message != WM_KEYUP);
+   }
+   else if(wparam == 'A')
+   {
+      input->move_left = (message != WM_KEYUP);
+   }
+   else if(wparam == 'S')
+   {
+      input->move_down = (message != WM_KEYUP);
+   }
+   else if(wparam == 'D')
+   {
+      input->move_right = (message != WM_KEYUP);
+   }
 
    // Mouse handling:
    if(message == WM_LBUTTONUP || message == WM_LBUTTONDOWN)
@@ -488,7 +504,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
    BITMAPINFOHEADER bitmap_header = {0};
    bitmap_header.biSize = sizeof(BITMAPINFOHEADER);
    bitmap_header.biWidth = bitmap.width;
-   bitmap_header.biHeight = -(s32)bitmap.height; // NOTE(law): Negative will indicate a top-down bitmap.
+   bitmap_header.biHeight = (s32)bitmap.height; // NOTE(law): Negative will indicate a top-down bitmap.
    bitmap_header.biPlanes = 1;
    bitmap_header.biBitCount = 32;
    bitmap_header.biCompression = BI_RGB;

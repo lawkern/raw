@@ -13,6 +13,8 @@
 #define function static
 #define global static
 
+#define TAU32 6.28318530717959f
+
 #define ARRAY_LENGTH(a) (sizeof(a) / sizeof((a)[0]))
 #define LERP(a, t, b) (((1 - (t)) * (a)) + ((t) * (b)))
 
@@ -25,28 +27,15 @@ typedef uint64_t u64;
 typedef  int32_t s32;
 typedef  int64_t s64;
 
-struct render_bitmap
+function float sine(float turns)
 {
-   u32 width;
-   u32 height;
+   float result = sinf(turns * TAU32);
+   return(result);
+}
 
-   u32 *memory;
-};
-
-typedef union
+function float cosine(float turns)
 {
-   struct {float x, y, z;};
-   struct {float r, g, b;};
-} v3;
-
-function v3 vec3(float x, float y, float z)
-{
-   v3 result;
-
-   result.x = x;
-   result.y = y;
-   result.z = z;
-
+   float result = cosf(turns * TAU32);
    return(result);
 }
 
@@ -65,6 +54,34 @@ function float square_root(float value)
 function float absolute_value(float value)
 {
    float result = (float)fabs(value);
+   return(result);
+}
+
+typedef union
+{
+   struct {float x, y, z;};
+   struct {float r, g, b;};
+} v3;
+
+typedef union
+{
+   struct {float x, y, z, w;};
+   struct {float r, g, b, a;};
+} v4;
+
+typedef union
+{
+   float matrix[4][4];
+} matrix4;
+
+function v3 vec3(float x, float y, float z)
+{
+   v3 result;
+
+   result.x = x;
+   result.y = y;
+   result.z = z;
+
    return(result);
 }
 
@@ -152,6 +169,99 @@ function v3 noz3(v3 vector)
    return(result);
 }
 
+function matrix4 rotation_x_matrix4(float turns)
+{
+   float s = sine(turns);
+   float c = cosine(turns);
+
+   matrix4 result =
+   {
+      1,  0,  0,  0,
+      0,  c,  s,  0,
+      0, -s,  c,  0,
+      0,  0,  0,  1,
+   };
+
+   return(result);
+}
+
+function matrix4 rotation_y_matrix4(float turns)
+{
+   float s = sine(turns);
+   float c = cosine(turns);
+
+   matrix4 result =
+   {
+      c,  0, -s,  0,
+      0,  1,  0,  0,
+      s,  0,  c,  0,
+      0,  0,  0,  1,
+   };
+
+   return(result);
+}
+
+function matrix4 rotation_z_matrix4(float turns)
+{
+   float s = sine(turns);
+   float c = cosine(turns);
+
+   matrix4 result =
+   {
+      c,  s,  0,  0,
+     -s,  c,  0,  0,
+      0,  0,  1,  0,
+      0,  0,  0,  1,
+   };
+
+   return(result);
+}
+
+function matrix4 rotation_matrix4(v3 axis, float turns)
+{
+   float s = sine(turns);
+   float c = cosine(turns);
+
+   v3 a = noz3(axis);
+   matrix4 result;
+
+   result.matrix[0][0] = a.x * a.x + (1 - a.x * a.x) * c;
+   result.matrix[0][1] = a.x * a.y * (1 - c) - a.z * s;
+   result.matrix[0][2] = a.x * a.z * (1 - c) + a.y * s;
+   result.matrix[0][3] = 0;
+
+   result.matrix[1][0] = a.x * a.y * (1 - c) + a.z * s;
+   result.matrix[1][1] = a.y * a.y + (1 - a.y * a.y) * c;
+   result.matrix[1][2] = a.y * a.z * (1 - c) - a.x * s;
+   result.matrix[1][3] = 0;
+
+   result.matrix[2][0] = a.x * a.z * (1 - c) - a.y * s;
+   result.matrix[2][1] = a.y * a.z * (1 - c) + a.x * s;
+   result.matrix[2][2] = a.z * a.z + (1 - a.z * a.z) * c;
+   result.matrix[2][3] = 0;
+
+   return(result);
+}
+
+function v3 transform3(v3 vector, matrix4 transform)
+{
+   v3 result;
+
+   result.x = (vector.x * transform.matrix[0][0]) + (vector.y * transform.matrix[0][1]) + (vector.z * transform.matrix[0][2]);
+   result.y = (vector.x * transform.matrix[1][0]) + (vector.y * transform.matrix[1][1]) + (vector.z * transform.matrix[1][2]);
+   result.z = (vector.x * transform.matrix[2][0]) + (vector.y * transform.matrix[2][1]) + (vector.z * transform.matrix[2][2]);
+
+   return(result);
+}
+
+struct render_bitmap
+{
+   u32 width;
+   u32 height;
+
+   u32 *memory;
+};
+
 struct user_input
 {
    s32 mouse_x;
@@ -170,6 +280,11 @@ struct user_input
    bool down;
    bool left;
    bool right;
+
+   bool move_up;
+   bool move_down;
+   bool move_left;
+   bool move_right;
 };
 
 struct plane
@@ -189,25 +304,39 @@ global struct
    // its image. It's z-axis points into the scene.
 
    v3 camera_position;
-   v3 camera_x;
-   v3 camera_y;
-   v3 camera_z;
+
+   v3 camera_x; // right
+   v3 camera_y; // up
+   v3 camera_z; // negative direction
+
+   float focal_length;
 
    u32 plane_count;
    struct plane planes[32];
 } scene;
 
 function void
+point_camera(v3 camera_position, v3 target_position, v3 up)
+{
+   scene.camera_position = camera_position;
+
+   scene.camera_z = noz3(sub3(camera_position, target_position));
+   scene.camera_x = noz3(cross3(noz3(up), scene.camera_z));
+   scene.camera_y = cross3(scene.camera_z, scene.camera_x);
+}
+
+function void
 update(struct render_bitmap *bitmap, struct user_input *input, float frame_seconds_elapsed)
 {
-   u32 bitmap_width = bitmap->width;
-   u32 bitmap_height = bitmap->height;
-
    v3 initial_camera_position = {0, 15.0f, 1.5f};
+   v3 initial_target_position = {0, 0, 1.5f};
+   v3 initial_up = {0, 0, 1};
+   float initial_focal_length = 1.0f;
 
    if(!scene.is_initialized)
    {
-      scene.camera_position = initial_camera_position;
+      point_camera(initial_camera_position, initial_target_position, initial_up);
+      scene.focal_length = initial_focal_length;
 
       struct plane *p;
 
@@ -232,54 +361,79 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
    // NOTE(law): Handle user input.
    if(input->function_keys[1])
    {
-      scene.camera_position = initial_camera_position;
+      // NOTE(law): Reset camera.
+      point_camera(initial_camera_position, initial_target_position, initial_up);
+      scene.focal_length = initial_focal_length;
    }
    else
    {
-      v3 movement = {0, 0, 0};
-      float increment = 0.2f;
+      if(input->control_scroll)
+      {
+         scene.focal_length += (input->scroll_delta * 0.25f);
+      }
+
+      float pitch_turns = 0;
+      float yaw_turns = 0;
+      float turn_increment = 0.01f;
+
+      if(input->move_up)
+      {
+         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_z, 0.25f));
+      }
+      if(input->move_down)
+      {
+         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_z, 0.25f));
+      }
+      if(input->move_left)
+      {
+         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_x, 0.25f));
+      }
+      if(input->move_right)
+      {
+         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_x, 0.25f));
+      }
 
       if(input->up)
       {
-         v3 direction_z = mul3(scene.camera_z, increment);
-         movement.x += direction_z.x;
-         movement.y += direction_z.y;
+         pitch_turns += turn_increment;
       }
       if(input->down)
       {
-         v3 direction_z = mul3(scene.camera_z, increment);
-         movement.x -= direction_z.x;
-         movement.y -= direction_z.y;
+         pitch_turns -= turn_increment;
       }
       if(input->left)
       {
-         v3 direction_x = mul3(scene.camera_x, increment);
-         movement.x -= direction_x.x;
-         movement.y -= direction_x.y;
+         yaw_turns -= turn_increment;
       }
       if(input->right)
       {
-         v3 direction_x = mul3(scene.camera_x, increment);
-         movement.x += direction_x.x;
-         movement.y += direction_x.y;
+         yaw_turns += turn_increment;
       }
 
-      scene.camera_position = add3(scene.camera_position, movement);
+      if(pitch_turns)
+      {
+         matrix4 rotation_pitch = rotation_matrix4(scene.camera_x, pitch_turns);
+         scene.camera_x = noz3(transform3(scene.camera_x, rotation_pitch));
+         scene.camera_y = noz3(transform3(scene.camera_y, rotation_pitch));
+         scene.camera_z = noz3(transform3(scene.camera_z, rotation_pitch));
+      }
+
+      if(yaw_turns)
+      {
+         matrix4 rotation_yaw = rotation_z_matrix4(yaw_turns);
+         scene.camera_x = noz3(transform3(scene.camera_x, rotation_yaw));
+         scene.camera_y = noz3(transform3(scene.camera_y, rotation_yaw));
+         scene.camera_z = noz3(transform3(scene.camera_z, rotation_yaw));
+      }
    }
 
-   // NOTE(law): Calculate camera vectors.
-   v3 origin = {0, 0, 0};
-   scene.camera_z = noz3(sub3(origin, scene.camera_position));
-   scene.camera_x = noz3(cross3(vec3(0, 0, -1), scene.camera_z));
-   scene.camera_y = noz3(cross3(scene.camera_z, scene.camera_x));
-
+   u32 bitmap_width = bitmap->width;
+   u32 bitmap_height = bitmap->height;
    float aspect_ratio = (float)bitmap_width / (float)bitmap_height;
 
    float film_width = 1.0f;
    float film_height = 1.0f / aspect_ratio;
-
-   float focal_length = 1.0f;
-   v3 film_center = add3(scene.camera_position, mul3(scene.camera_z, focal_length));
+   v3 film_center = sub3(scene.camera_position, mul3(scene.camera_z, scene.focal_length));
 
    // NOTE(law): Draw into bitmap.
    for(u32 y = 0; y < bitmap_height; ++y)
@@ -318,7 +472,7 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
          if(t_plane)
          {
             float t = dot3(ray_direction, mul3(t_plane->normal, -1.0f));
-            ray_color = lerp3(vec3(0, 0.8f, 0.8f), t, t_plane->color);
+            ray_color = lerp3(vec3(0.3f, 0.8f, 0.8f), t, t_plane->color);
          }
 
          u8 r = (u8)(ray_color.r * 255.0f);
