@@ -28,6 +28,8 @@ typedef  int64_t s64;
 #define PLATFORM_LOG(name) void name(char *format, ...)
 function PLATFORM_LOG(platform_log);
 
+struct platform_work_queue;
+
 #define PLATFORM_QUEUE_CALLBACK(name) void name(struct platform_work_queue *queue, void *data)
 typedef PLATFORM_QUEUE_CALLBACK(queue_callback);
 

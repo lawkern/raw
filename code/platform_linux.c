@@ -3,6 +3,8 @@
 /* /////////////////////////////////////////////////////////////////////////// */
 
 #include <fcntl.h>
+#include <pthread.h>
+#include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -52,6 +54,94 @@ PLATFORM_LOG(platform_log)
    va_end(arguments);
 
    printf("%s", message);
+}
+
+struct platform_work_queue
+{
+   u32 volatile read_index;
+   u32 volatile write_index;
+
+   u32 volatile completion_target;
+   u32 volatile completion_count;
+
+   sem_t semaphore;
+
+   struct queue_entry entries[512];
+};
+
+function
+PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
+{
+   u32 new_write_index = (queue->write_index + 1) % ARRAY_LENGTH(queue->entries);
+   assert(new_write_index != queue->read_index);
+
+   struct queue_entry *entry = queue->entries + queue->write_index;
+   entry->data = data;
+   entry->callback = callback;
+
+   queue->completion_target++;
+
+   asm volatile("" ::: "memory");
+
+   queue->write_index = new_write_index;
+   sem_post(&queue->semaphore);
+}
+
+function bool
+linux_dequeue_work(struct platform_work_queue *queue)
+{
+   bool ready_to_wait = false;
+
+   u32 read_index = queue->read_index;
+   u32 new_read_index = (read_index + 1) % ARRAY_LENGTH(queue->entries);
+   if(read_index != queue->write_index)
+   {
+      u32 index = __sync_val_compare_and_swap(&queue->read_index, read_index, new_read_index);
+      if(index == read_index)
+      {
+         struct queue_entry entry = queue->entries[index];
+         entry.callback(queue, entry.data);
+
+         __sync_add_and_fetch(&queue->completion_count, 1);
+      }
+   }
+   else
+   {
+      ready_to_wait = true;
+   }
+
+   return(ready_to_wait);
+}
+
+function
+PLATFORM_COMPLETE_QUEUE(platform_complete_queue)
+{
+   while(queue->completion_target > queue->completion_count)
+   {
+      linux_dequeue_work(queue);
+   }
+
+   queue->completion_target = 0;
+   queue->completion_count = 0;
+}
+
+function void *
+linux_thread_procedure(void *data)
+{
+   struct platform_work_queue *queue = (struct platform_work_queue *)data;
+   platform_log("Worker thread launched.\n");
+
+   while(1)
+   {
+      if(linux_dequeue_work(queue))
+      {
+         sem_wait(&queue->semaphore);
+      }
+   }
+
+   platform_log("Worker thread terminated.\n");
+
+   return(0);
 }
 
 function void *
@@ -514,9 +604,29 @@ linux_process_events(Window window, struct user_input *input)
    }
 }
 
+function u32
+linux_get_processor_count()
+{
+   u32 result = sysconf(_SC_NPROCESSORS_ONLN);
+   return(result);
+}
+
 int
 main(int argument_count, char **arguments)
 {
+   struct platform_work_queue queue = {0};
+   sem_init(&queue.semaphore, 0, 0);
+
+   u32 processor_count = linux_get_processor_count();
+   platform_log("%u processors currently online.\n", processor_count);
+
+   for(long index = 1; index < processor_count; ++index)
+   {
+      pthread_t id;
+      pthread_create(&id, 0, linux_thread_procedure, &queue);
+      pthread_detach(id);
+   }
+
    // NOTE(law) Set up the rendering bitmap.
    struct render_bitmap bitmap = {RESOLUTION_BASE_WIDTH, RESOLUTION_BASE_HEIGHT};
 
@@ -534,7 +644,7 @@ main(int argument_count, char **arguments)
 
    struct user_input input = {0};
 
-   float target_seconds_per_frame = 1.0f / 30.0f;
+   float target_seconds_per_frame = 1.0f / 60.0f;
    float frame_seconds_elapsed = 0;
 
    struct timespec frame_start_count;
@@ -545,7 +655,7 @@ main(int argument_count, char **arguments)
    {
       linux_process_events(window, &input);
 
-      update(&bitmap, &input, frame_seconds_elapsed);
+      update(&bitmap, &input, &queue, frame_seconds_elapsed);
 
       // NOTE(law): Blit bitmap to screen.
       linux_display_bitmap(window, bitmap);
@@ -573,8 +683,12 @@ main(int argument_count, char **arguments)
       }
       frame_start_count = frame_end_count;
 
-      platform_log("Frame time: %0.03fms, ", frame_seconds_elapsed * 1000.0f);
-      platform_log("Sleep: %uus\n", sleep_us);
+      static u32 frame_count = 0;
+      if((frame_count++ % 30) == 0)
+      {
+         platform_log("Frame time: %0.03fms, ", frame_seconds_elapsed * 1000.0f);
+         platform_log("Sleep: %uus\n", sleep_us);
+      }
    }
 
    XCloseDisplay(linux_global_display);
