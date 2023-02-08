@@ -19,14 +19,29 @@
 #define MINIMUM(a, b) ((a) < (b) ? (a) : (b))
 #define LERP(a, t, b) (((1 - (t)) * (a)) + ((t) * (b)))
 
-#define PLATFORM_LOG(name) void name(char *format, ...)
-function PLATFORM_LOG(platform_log);
-
 typedef uint8_t  u8;
 typedef uint32_t u32;
 typedef uint64_t u64;
 typedef  int32_t s32;
 typedef  int64_t s64;
+
+#define PLATFORM_LOG(name) void name(char *format, ...)
+function PLATFORM_LOG(platform_log);
+
+#define PLATFORM_QUEUE_CALLBACK(name) void name(struct platform_work_queue *queue, void *data)
+typedef PLATFORM_QUEUE_CALLBACK(queue_callback);
+
+struct queue_entry
+{
+   void *data;
+   queue_callback *callback;
+};
+
+#define PLATFORM_ENQUEUE_WORK(name) void name(struct platform_work_queue *queue, void *data, queue_callback *callback)
+function PLATFORM_ENQUEUE_WORK(platform_enqueue_work);
+
+#define PLATFORM_COMPLETE_QUEUE(name) void name(struct platform_work_queue *queue)
+function PLATFORM_COMPLETE_QUEUE(platform_complete_queue);
 
 function float sine(float turns)
 {
@@ -386,8 +401,25 @@ render_tile(struct render_bitmap *bitmap, u32 minx, u32 miny, u32 maxx, u32 maxy
    }
 }
 
+struct tile_data
+{
+   struct render_bitmap *bitmap;
+   u32 minx;
+   u32 miny;
+   u32 maxx;
+   u32 maxy;
+};
+
+function
+PLATFORM_QUEUE_CALLBACK(render_tile_callback)
+{
+   struct tile_data *tile = (struct tile_data *)data;
+   render_tile(tile->bitmap, tile->minx, tile->miny, tile->maxx, tile->maxy);
+}
+
 function void
-update(struct render_bitmap *bitmap, struct user_input *input, float frame_seconds_elapsed)
+update(struct render_bitmap *bitmap, struct user_input *input,
+       struct platform_work_queue *queue, float frame_seconds_elapsed)
 {
    v3 initial_camera_position = {0, 15.0f, 1.5f};
    v3 initial_target_position = {0, 0, 1.5f};
@@ -433,26 +465,28 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
          scene.focal_length += (input->scroll_delta * 0.25f);
       }
 
-      float pitch_turns = 0;
-      float yaw_turns = 0;
-      float turn_increment = 0.01f;
+      float move_increment = 10.0f * frame_seconds_elapsed;
+      float turn_increment = 0.25f * frame_seconds_elapsed;
 
       if(input->move_up)
       {
-         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_z, 0.25f));
+         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_z, move_increment));
       }
       if(input->move_down)
       {
-         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_z, 0.25f));
+         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_z, move_increment));
       }
       if(input->move_left)
       {
-         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_x, 0.25f));
+         scene.camera_position = sub3(scene.camera_position, mul3(scene.camera_x, move_increment));
       }
       if(input->move_right)
       {
-         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_x, 0.25f));
+         scene.camera_position = add3(scene.camera_position, mul3(scene.camera_x, move_increment));
       }
+
+      float pitch_turns = 0;
+      float yaw_turns = 0;
 
       if(input->up)
       {
@@ -490,26 +524,35 @@ update(struct render_bitmap *bitmap, struct user_input *input, float frame_secon
 
    // NOTE(law): Draw into bitmap.
 
-   u32 tile_width  = 64;
-   u32 tile_height = 64;
+#define TILE_WIDTH  64
+#define TILE_HEIGHT 64
 
-   u32 bitmap_width  = bitmap->width;
-   u32 bitmap_height = bitmap->height;
+   struct tile_data tiles[TILE_WIDTH * TILE_HEIGHT];
 
-   u32 tile_count_x = (bitmap_width / tile_width) + 1;
-   u32 tile_count_y = (bitmap_height / tile_height) + 1;
+   u32 tile_count_x = ((bitmap->width - 1) / TILE_WIDTH) + 1;
+   u32 tile_count_y = ((bitmap->height - 1) / TILE_HEIGHT) + 1;
 
+   u32 tile_index = 0;
    for(u32 y = 0; y < tile_count_y; ++y)
    {
-      u32 miny = tile_height * y;
-      u32 maxy = MINIMUM(miny + tile_height, bitmap_height);
+      u32 miny = TILE_HEIGHT * y;
+      u32 maxy = MINIMUM(miny + TILE_HEIGHT, bitmap->height);
 
       for(u32 x = 0; x < tile_count_x; ++x)
       {
-         u32 minx = tile_width * x;
-         u32 maxx = MINIMUM(minx + tile_width, bitmap_width);
+         u32 minx = TILE_WIDTH * x;
+         u32 maxx = MINIMUM(minx + TILE_WIDTH, bitmap->width);
 
-         render_tile(bitmap, minx, miny, maxx, maxy);
+         struct tile_data *data = tiles + tile_index++;
+         data->bitmap = bitmap;
+         data->minx = minx;
+         data->miny = miny;
+         data->maxx = maxx;
+         data->maxy = maxy;
+
+         platform_enqueue_work(queue, data, render_tile_callback);
       }
    }
+
+   platform_complete_queue(queue);
 }

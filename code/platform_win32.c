@@ -10,6 +10,19 @@
 
 #include "raw.c"
 
+struct platform_work_queue
+{
+   u32 volatile read_index;
+   u32 volatile write_index;
+
+   u32 volatile completion_target;
+   u32 volatile completion_count;
+
+   HANDLE semaphore;
+
+   struct queue_entry entries[512];
+};
+
 #define WIN32_SECONDS_ELAPSED(start, end) ((float)((end).QuadPart - (start).QuadPart) \
       / (float)win32_global_counts_per_second.QuadPart)
 
@@ -40,6 +53,81 @@ PLATFORM_LOG(platform_log)
    va_end(arguments);
 
    OutputDebugStringA(message);
+}
+
+function
+PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
+{
+   u32 new_write_index = (queue->write_index + 1) % ARRAY_LENGTH(queue->entries);
+   assert(new_write_index != queue->read_index);
+
+   struct queue_entry *entry = queue->entries + queue->write_index;
+   entry->data = data;
+   entry->callback = callback;
+
+   queue->completion_target++;
+
+   _WriteBarrier();
+
+   queue->write_index = new_write_index;
+   ReleaseSemaphore(queue->semaphore, 1, 0);
+}
+
+function bool
+win32_dequeue_work(struct platform_work_queue *queue)
+{
+   bool ready_to_wait = false;
+
+   u32 read_index = queue->read_index;
+   u32 new_read_index = (read_index + 1) % ARRAY_LENGTH(queue->entries);
+   if(read_index != queue->write_index)
+   {
+      u32 index = InterlockedCompareExchange(&queue->read_index, new_read_index, read_index);
+      if(index == read_index)
+      {
+         struct queue_entry entry = queue->entries[index];
+         entry.callback(queue, entry.data);
+
+         InterlockedIncrement(&queue->completion_count);
+      }
+   }
+   else
+   {
+      ready_to_wait = true;
+   }
+
+   return(ready_to_wait);
+}
+
+function
+PLATFORM_COMPLETE_QUEUE(platform_complete_queue)
+{
+   while(queue->completion_target > queue->completion_count)
+   {
+      win32_dequeue_work(queue);
+   }
+
+   queue->completion_target = 0;
+   queue->completion_count = 0;
+}
+
+function DWORD WINAPI
+win32_thread_procedure(void *parameter)
+{
+   struct platform_work_queue *queue = (struct platform_work_queue *)parameter;
+   platform_log("Worker thread launched.\n");
+
+   while(1)
+   {
+      if(win32_dequeue_work(queue))
+      {
+         WaitForSingleObjectEx(queue->semaphore, INFINITE, FALSE);
+      }
+   }
+
+   platform_log("Worker thread terminated.\n");
+
+   return(0);
 }
 
 function void *
@@ -448,11 +536,40 @@ win32_window_callback(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
    return(result);
 }
 
+function u32
+win32_get_processor_count()
+{
+   SYSTEM_INFO info;
+   GetSystemInfo(&info);
+
+   u32 result = info.dwNumberOfProcessors;
+   return(result);
+}
+
 INT WINAPI
 WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT show_command)
 {
    QueryPerformanceFrequency(&win32_global_counts_per_second);
    bool sleep_is_granular = (timeBeginPeriod(1) == TIMERR_NOERROR);
+
+   u32 processor_count = win32_get_processor_count();
+
+   struct platform_work_queue queue = {0};
+   queue.semaphore = CreateSemaphoreExA(0, 0, processor_count, 0, 0, SEMAPHORE_ALL_ACCESS);
+
+   for(u32 index = 1; index < processor_count; ++index)
+   {
+      DWORD thread_id;
+      HANDLE thread_handle = CreateThread(0, 0, win32_thread_procedure, &queue, 0, &thread_id);
+      if(thread_handle)
+      {
+         CloseHandle(thread_handle);
+      }
+      else
+      {
+         platform_log("ERROR: Windows failed to create thread %u.\n", index);
+      }
+   }
 
    WNDCLASSEX window_class = {0};
    window_class.cbSize = sizeof(window_class);
@@ -520,7 +637,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
 
    struct user_input input = {0};
 
-   float target_seconds_per_frame = 1.0f / 30.0f;
+   float target_seconds_per_frame = 1.0f / 60.0f;
    float frame_seconds_elapsed = 0;
 
    LARGE_INTEGER frame_start_count;
@@ -565,7 +682,7 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
       input.mouse_x = cursor_position.x;
       input.mouse_y = cursor_position.y;
 
-      update(&bitmap, &input, frame_seconds_elapsed);
+      update(&bitmap, &input, &queue, frame_seconds_elapsed);
 
       // NOTE(law): Blit bitmap to screen.
       HDC device_context = GetDC(window);
@@ -599,8 +716,12 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
       }
       frame_start_count = frame_end_count;
 
-      platform_log("Frame time: %0.03fms, ", frame_seconds_elapsed * 1000.0f);
-      platform_log("Sleep: %ums\n", sleep_ms);
+      static u32 frame_count = 0;
+      if((frame_count++ % 30) == 0)
+      {
+         platform_log("Frame time: %0.03fms, ", frame_seconds_elapsed * 1000.0f);
+         platform_log("Sleep: %ums\n", sleep_ms);
+      }
    }
 
    return(0);
