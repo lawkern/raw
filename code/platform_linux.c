@@ -23,13 +23,13 @@
 #include <stdio.h>
 #include <time.h>
 
-#define LINUX_SECONDS_ELAPSED(start, end) ((float)((end).tv_sec - (start).tv_sec) \
-        + (1e-9f * (float)((end).tv_nsec - (start).tv_nsec)))
-
 #define LINUX_LOG_MAX_LENGTH 1024
 
 #include "raw.c"
 #include "renderer_opengl.c"
+
+#define LINUX_SECONDS_ELAPSED(start, end) ((float)((end).tv_sec - (start).tv_sec) \
+        + (1e-9f * (float)((end).tv_nsec - (start).tv_nsec)))
 
 struct linux_window_dimensions
 {
@@ -58,11 +58,11 @@ PLATFORM_LOG(platform_log)
 
 struct platform_work_queue
 {
-   u32 volatile read_index;
-   u32 volatile write_index;
+   volatile u32 read_index;
+   volatile u32 write_index;
 
-   u32 volatile completion_target;
-   u32 volatile completion_count;
+   volatile u32 completion_target;
+   volatile u32 completion_count;
 
    sem_t semaphore;
 
@@ -90,27 +90,26 @@ PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
 function bool
 linux_dequeue_work(struct platform_work_queue *queue)
 {
-   bool ready_to_wait = false;
+   // NOTE(law): Return whether this thread should be made to wait until more
+   // work becomes available.
 
    u32 read_index = queue->read_index;
    u32 new_read_index = (read_index + 1) % ARRAY_LENGTH(queue->entries);
-   if(read_index != queue->write_index)
+   if(read_index == queue->write_index)
    {
-      u32 index = __sync_val_compare_and_swap(&queue->read_index, read_index, new_read_index);
-      if(index == read_index)
-      {
-         struct queue_entry entry = queue->entries[index];
-         entry.callback(queue, entry.data);
-
-         __sync_add_and_fetch(&queue->completion_count, 1);
-      }
-   }
-   else
-   {
-      ready_to_wait = true;
+      return(true);
    }
 
-   return(ready_to_wait);
+   u32 index = __sync_val_compare_and_swap(&queue->read_index, read_index, new_read_index);
+   if(index == read_index)
+   {
+      struct queue_entry entry = queue->entries[index];
+      entry.callback(queue, entry.data);
+
+      __sync_add_and_fetch(&queue->completion_count, 1);
+   }
+
+   return(false);
 }
 
 function

@@ -10,22 +10,13 @@
 
 #include "raw.c"
 
-struct platform_work_queue
-{
-   u32 volatile read_index;
-   u32 volatile write_index;
-
-   u32 volatile completion_target;
-   u32 volatile completion_count;
-
-   HANDLE semaphore;
-
-   struct queue_entry entries[512];
-};
-
 #define WIN32_SECONDS_ELAPSED(start, end) ((float)((end).QuadPart - (start).QuadPart) \
       / (float)win32_global_counts_per_second.QuadPart)
 
+#define WIN32_LOG_MAX_LENGTH 1024
+#define WIN32_DEFAULT_DPI 96
+
+global int win32_global_dpi = WIN32_DEFAULT_DPI;
 global bool win32_global_is_running;
 global LARGE_INTEGER win32_global_counts_per_second;
 global BITMAPINFO *win32_global_bitmap_info;
@@ -34,11 +25,6 @@ global WINDOWPLACEMENT win32_global_previous_window_placement =
 {
    sizeof(win32_global_previous_window_placement)
 };
-
-#define WIN32_DEFAULT_DPI 96
-global int win32_global_dpi = WIN32_DEFAULT_DPI;
-
-#define WIN32_LOG_MAX_LENGTH 1024
 
 function
 PLATFORM_LOG(platform_log)
@@ -54,6 +40,19 @@ PLATFORM_LOG(platform_log)
 
    OutputDebugStringA(message);
 }
+
+struct platform_work_queue
+{
+   volatile u32 read_index;
+   volatile u32 write_index;
+
+   volatile u32 completion_target;
+   volatile u32 completion_count;
+
+   HANDLE semaphore;
+
+   struct queue_entry entries[512];
+};
 
 function
 PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
@@ -76,27 +75,26 @@ PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
 function bool
 win32_dequeue_work(struct platform_work_queue *queue)
 {
-   bool ready_to_wait = false;
+   // NOTE(law): Return whether this thread should be made to wait until more
+   // work becomes available.
 
    u32 read_index = queue->read_index;
    u32 new_read_index = (read_index + 1) % ARRAY_LENGTH(queue->entries);
-   if(read_index != queue->write_index)
+   if(read_index == queue->write_index)
    {
-      u32 index = InterlockedCompareExchange(&queue->read_index, new_read_index, read_index);
-      if(index == read_index)
-      {
-         struct queue_entry entry = queue->entries[index];
-         entry.callback(queue, entry.data);
-
-         InterlockedIncrement(&queue->completion_count);
-      }
-   }
-   else
-   {
-      ready_to_wait = true;
+      return(true);
    }
 
-   return(ready_to_wait);
+   u32 index = InterlockedCompareExchange(&queue->read_index, new_read_index, read_index);
+   if(index == read_index)
+   {
+      struct queue_entry entry = queue->entries[index];
+      entry.callback(queue, entry.data);
+
+      InterlockedIncrement(&queue->completion_count);
+   }
+
+   return(false);
 }
 
 function
@@ -561,14 +559,13 @@ WinMain(HINSTANCE instance, HINSTANCE previous_instance, LPSTR command_line, INT
    {
       DWORD thread_id;
       HANDLE thread_handle = CreateThread(0, 0, win32_thread_procedure, &queue, 0, &thread_id);
-      if(thread_handle)
-      {
-         CloseHandle(thread_handle);
-      }
-      else
+      if(!thread_handle)
       {
          platform_log("ERROR: Windows failed to create thread %u.\n", index);
+         continue;
       }
+
+      CloseHandle(thread_handle);
    }
 
    WNDCLASSEX window_class = {0};
