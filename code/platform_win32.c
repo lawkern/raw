@@ -8,6 +8,8 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+typedef HANDLE platform_semaphore;
+
 #include "raw.c"
 
 #define WIN32_SECONDS_ELAPSED(start, end) ((float)((end).QuadPart - (start).QuadPart) \
@@ -40,19 +42,6 @@ PLATFORM_LOG(platform_log)
 
    OutputDebugStringA(message);
 }
-
-struct platform_work_queue
-{
-   volatile u32 read_index;
-   volatile u32 write_index;
-
-   volatile u32 completion_target;
-   volatile u32 completion_count;
-
-   HANDLE semaphore;
-
-   struct queue_entry entries[512];
-};
 
 function
 PLATFORM_ENQUEUE_WORK(platform_enqueue_work)

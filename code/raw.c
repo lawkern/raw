@@ -39,6 +39,22 @@ struct queue_entry
    queue_callback *callback;
 };
 
+// NOTE(law): Each platform should typedef the appropriate platform-specific
+// semaphore type to platform_semaphore before #include'ing this file.
+
+struct platform_work_queue
+{
+   volatile u32 read_index;
+   volatile u32 write_index;
+
+   volatile u32 completion_target;
+   volatile u32 completion_count;
+
+   platform_semaphore semaphore;
+
+   struct queue_entry entries[512];
+};
+
 #define PLATFORM_ENQUEUE_WORK(name) void name(struct platform_work_queue *queue, void *data, queue_callback *callback)
 function PLATFORM_ENQUEUE_WORK(platform_enqueue_work);
 

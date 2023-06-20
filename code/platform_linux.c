@@ -25,6 +25,8 @@
 
 #define LINUX_LOG_MAX_LENGTH 1024
 
+typedef sem_t platform_semaphore;
+
 #include "raw.c"
 #include "renderer_opengl.c"
 
@@ -55,19 +57,6 @@ PLATFORM_LOG(platform_log)
 
    printf("%s", message);
 }
-
-struct platform_work_queue
-{
-   volatile u32 read_index;
-   volatile u32 write_index;
-
-   volatile u32 completion_target;
-   volatile u32 completion_count;
-
-   sem_t semaphore;
-
-   struct queue_entry entries[512];
-};
 
 function
 PLATFORM_ENQUEUE_WORK(platform_enqueue_work)
